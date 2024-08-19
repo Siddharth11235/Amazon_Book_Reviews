@@ -1,0 +1,242 @@
+x-airflow-common:
+  &airflow-common
+  build:
+    context: ./containers/airflow/
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres/book_reviews
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKEND: 'airflow.api.auth.backend.basic_auth'
+    AIRFLOW_CONN_POSTGRES_DEFAULT: postgres://postgres:postgres@postgres/book_reviews
+    AIRFLOW_CONN_SPARK_LOCAL: 'spark://spark-master:7077'
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./tests:/opt/airflow/tests
+    - ./temp:/opt/airflow/temp
+    - ./dags/jobs:/opt/jobs
+
+  user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+
+services:
+  postgres:
+    image: debezium/postgres:15
+    container_name: postgres
+    hostname: postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=book_reviews
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "postgres" ]
+      interval: 5s
+      retries: 5
+    restart: always
+    networks:
+      - airflow-spark-network
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: webserver
+    command: webserver
+    ports:
+      - 8080:8080
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "http://localhost:8080/health"
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    volumes:
+      - ./dags/jobs:/opt/jobs
+    networks:
+      - airflow-spark-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      spark-master:
+        condition: service_healthy
+
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: scheduler
+    command: scheduler
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"'
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    networks:
+      - airflow-spark-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      spark-master:
+        condition: service_healthy
+
+
+  airflow-init:
+    <<: *airflow-common
+    command: version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    networks:
+      - airflow-spark-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      spark-master:
+        condition: service_healthy
+
+
+
+  spark-master:
+    build:
+      context: ./containers/spark_master/
+    environment:
+      - SPARK_MODE=master
+    networks:
+      - airflow-spark-network
+    volumes:
+      - ./dags/jobs:/opt/jobs
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", '(sleep 1; echo > /dev/tcp/localhost/8080) >/dev/null 2>&1 || exit 1']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+
+  spark-worker:
+    build:
+      context: ./containers/spark_worker/
+    volumes:
+      - ./dags/jobs:/opt/jobs
+      - ./tmp:/tmp
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=6
+      - SPARK_WORKER_MEMORY=12g
+      - SPARK_EXECUTOR_MEMORY=12g
+    mem_limit: 14g
+    networks:
+      - airflow-spark-network
+    depends_on:
+      - spark-master
+
+  metadata_datagen:
+    build:
+      context: ./containers/metadata_datagen/
+    volumes:
+      - ./metadata_datagen:/opt/datagen
+      - ./data:/opt/data
+    container_name: metadata_datagen
+    depends_on:
+      - postgres
+    networks:
+      - airflow-spark-network
+    environment:
+      - METADATA_DB_USER=postgres
+      - POSTGRES_DB=book_reviews
+      - METADATA_DB_PWD=postgres
+      - METADATA_FILENAME=/opt/data/meta_Books.json
+
+  datagen:
+    build:
+      context: ./containers/datagen/
+    command: /bin/sh -c "cd /opt/datagen && gunicorn -w 1 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:5000 --timeout 120 --forwarded-allow-ips='*' data_api:app"
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./datagen:/opt/datagen
+      - ./data:/opt/data
+    container_name: datagen
+    restart: on-failure
+    networks:
+      - airflow-spark-network
+    environment:
+      - REVIEW_DATA_FILENAME=/opt/data/Books_5.json
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - airflow-spark-network
+    depends_on:
+      - postgres
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus:/etc/prometheus/
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    networks:
+      - airflow-spark-network
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    networks:
+      - airflow-spark-network
+
+  airflow-prometheus-exporter:
+    image: pbweb/airflow-prometheus-exporter:latest
+    environment:
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres/book_reviews
+    ports:
+      - "9273:9273"
+    networks:
+      - airflow-spark-network
+    depends_on:
+      - postgres
+    command: ["airflow-exporter"]
+
+
+
+volumes:
+  grafana-data:
+
+networks:
+  airflow-spark-network:
+    driver: bridge

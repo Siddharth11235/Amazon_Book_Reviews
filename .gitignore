@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+dist/
+data/
+.eggs/
+logs/
+tmp/
+.env
+datagen/offset.txt
+.DS_Store
