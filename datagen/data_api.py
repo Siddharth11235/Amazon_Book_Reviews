@@ -24,6 +24,11 @@ class BookReview(BaseModel):
     review_text: Optional[str] = None
 
 
+class BookReviewsEnriched(BaseModel):
+    book_reviews: List[BookReview]
+    is_json_completed: bool
+
+
 BATCH_SIZE = 100000
 
 
@@ -33,6 +38,7 @@ class LoadReviews:
         self.offset_file = "offset.txt"
         self.current_offset = self._load_offset()
         self.file_path = file_path
+        self.num_reviews = None
         self.file_offsets = self.compute_offsets()
 
     def compute_offsets(self):
@@ -40,16 +46,17 @@ class LoadReviews:
         with open(self.file_path, "r+b") as f:
             mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
             position = 0
-
+            i = 0
             while True:
                 offsets.append(position)
                 line = mm.readline()
                 if not line:
                     break
                 position = mm.tell()
+                i += 1
 
             mm.close()
-
+        self.num_reviews = i
         return offsets
 
     def read_json_using_offsets(self):
@@ -113,7 +120,7 @@ load_reviews = LoadReviews(file_path="/opt/data/Books_5.json", batch_size=BATCH_
 @app.get(
     "/reviews",
     tags=["get"],
-    response_model=List[BookReview],
+    response_model=BookReviewsEnriched,
 )
 async def execution_events():
     """
@@ -122,9 +129,14 @@ async def execution_events():
     """
     start = time()
     df = load_reviews.execute()
-
+    num_reviews = load_reviews.num_reviews
+    current_offset = load_reviews.current_offset
+    if num_reviews > current_offset:
+        is_json_completed = False
+    else:
+        is_json_completed = True
     df = df.where(pd.notnull(df), None)
-    output = df.apply(
+    book_reviews = df.apply(
         lambda row: BookReview(
             asin=row["asin"],
             review_date=row["review_date"],
@@ -133,6 +145,11 @@ async def execution_events():
         ),
         axis=1,
     ).tolist()
+
+    output = BookReviewsEnriched(
+        book_reviews=book_reviews, is_json_completed=is_json_completed
+    )
+
     print(f"Time taken: {time() - start}")
 
     return output

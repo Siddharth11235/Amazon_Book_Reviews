@@ -1,6 +1,8 @@
 up:
-	docker compose up airflow-init && docker compose up --build -d && sleep 60
+	docker compose up airflow-init && docker compose up --build -d
 down:
 	docker compose down --volumes --rmi all && rm -f datagen/offset.txt
 
-restart: down up
+sleep:
+	sleep 60
+restart: down up sleep

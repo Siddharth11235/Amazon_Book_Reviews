@@ -38,6 +38,7 @@ class MetadataProcessor:
             & col("title").isNotNull()
             & col("price (USD)").isNotNull()
         )
+        self.df = self.df.dropDuplicates(["asin"])
         print(self.df.count())
 
     def save_to_db(self):
