@@ -215,27 +215,35 @@ services:
     networks:
       - airflow-spark-network
 
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: node-exporter
+  streamlit:
+    build:
+      context: ./containers/streamlit/
     ports:
-      - "9100:9100"
+      - "8501:8501"
+    volumes:
+      - ./streamlit:/streamlit
+    container_name: streamlit
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl --fail http://localhost:8501/_stcore/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
     networks:
       - airflow-spark-network
 
-  airflow-prometheus-exporter:
-    image: pbweb/airflow-prometheus-exporter:latest
-    environment:
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:postgres@postgres/book_reviews
-    ports:
-      - "9273:9273"
-    networks:
-      - airflow-spark-network
+  spark_review_text:
+    build:
+      context: ./containers/spark_review_text/
+    mem_limit: 14g
     depends_on:
       - postgres
-    command: ["airflow-exporter"]
-
-
+    volumes:
+      - ./spark:/opt/spark_review_text
+    container_name: spark_review_text
+    restart: on-failure
+    networks:
+      - airflow-spark-network
 
 volumes:
   grafana-data:

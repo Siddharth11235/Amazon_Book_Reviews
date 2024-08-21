@@ -124,7 +124,7 @@ load_reviews = LoadReviews(file_path="/opt/data/Books_5.json", batch_size=BATCH_
 )
 async def execution_events():
     """
-    This route will be pinged every 5 minutes and will be expected to post 10,000
+    This route will be pinged every 2 minutes and will be expected to post 100,000
     reviews.
     """
     start = time()
