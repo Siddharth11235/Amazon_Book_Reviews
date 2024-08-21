@@ -15,5 +15,6 @@ This project is to practice batch-based data pipelines using the[ Amazon Book Re
 - [x] Use grafana to visualize basic metrics.
 - [x] Split the airflow pipeline into an HTTPS step and a SparkSubmit step.
 - [x] Add the word clouds
+- [ ] Improve pipeline performance by setting up redis to move data instead of a local folder.
 - [ ] Setup terraform to move to cloud if needed.
 - [ ] Automate the graphana setup
