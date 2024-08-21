@@ -12,7 +12,7 @@ This project is to practice batch-based data pipelines using the[ Amazon Book Re
 - [x] Setup a postgres table for the book metadata.
 - [x] Setup a datagen API call that send a batch of N (100000 is the value I am using) reviews on being called.
 - [x] Setup a job with airflow to process the data to a postgres warehouse.
-- [x] Use grafana to visualize basic metrics.
+- [x] Use streamlit to visualize basic metrics.
 - [x] Split the airflow pipeline into an HTTPS step and a SparkSubmit step.
 - [x] Add the word clouds
 - [ ] Improve pipeline performance by setting up redis to move data instead of a local folder.
