@@ -34,6 +34,7 @@ def main():
         score = analyzer.polarity_scores(text)["compound"]
         return float(score)
 
+    # There is a spark function available for this.
     @udf(StringType())
     def clean_text(text):
         if text:
